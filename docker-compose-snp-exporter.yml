@@ -1,0 +1,12 @@
+version: '3'
+
+services:
+    app:
+        image: snp-exporter:1.0
+        container_name: snp-exporter
+        restart: on-failure
+        ports:
+            - 8082:8080
+        environment:
+            USERNAME_SNP: "admin"        # Set Username
+            PASSWORD_SNP: "password"     # Set Password

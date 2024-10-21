@@ -19,7 +19,7 @@ scrape_configs:
   - job_name: 'snpdata'  # Separate job if you need a different metrics path
     metrics_path: '/metrics/192.168.90.23/9089'  # Different metrics path
     static_configs:
-      - targets: ['192.168.90.102:8080']  # Second target
+      - targets: ['192.168.90.156:8082']  # Second target
 
 
 remote_write:

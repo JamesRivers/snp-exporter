@@ -192,7 +192,10 @@ async function snpGetToken(snpUrl, snpPort) {
 	console.log(`snpGetToken [ERROR] - ${snpUrl} - ${err}`);
 	}
 	}
-	
+
+
+// Async function to get Element Details
+
 	// Async function to get Processor Personality A
 	async function snpGetStatusProcA(snpUrl, snpPort) {
 	try {

@@ -1,5 +1,5 @@
 {
-  "name": "snp_exporter",
+  "name": "snp-exporter",
   "version": "1.0.0",
   "description": "A prometheus exporter to fetch values from Imagine SNP (IP Gateway) written in Node.js",
   "main": "main.js",
@@ -15,12 +15,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/YannickOlivier/snp_exporter.git"
+    "url": "git+https://git@github.com:JamesRivers/snp-exporter.git"
   },
   "author": "",
   "license": "Apache-2.0",
   "bugs": {
-    "url": "https://github.com/YannickOlivier/snp_exporter/issues"
+    "url": "https://github.com/JamesRivers/snp-exporter/issues"
   },
-  "homepage": "https://github.com/YannickOlivier/snp_exporter#readme"
+  "homepage": "https://github.com/JamesRivers/snp-exporter/blob/main/README"
 }
