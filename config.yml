@@ -1,0 +1,11 @@
+- name: wtl-tier2
+  websocket: "wss://192.168.90.23/smm"
+  restapi: "https://192.168.90.23:9089/api/auth"
+  objects_ids:
+    - {"elementIP":"127.0.0.1","objectType":"ptp"}
+    - {"elementIP":"127.0.0.1","objectType":"system"}
+    - {"elementIP":"127.0.0.1","objectType":"ipVidRx"}
+    - {"elementIP":"127.0.0.1","objectType":"procChannelHD","objectId":"A-HD-1"}
+    - {"elementIP":"127.0.0.1","objectType":"procChannelHD","objectId":"B-HD-1"}
+  username: admin
+  password: password

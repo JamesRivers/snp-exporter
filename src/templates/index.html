@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SNP Exporter - Connection Management</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .status-connected { color: #198754; }
+        .status-disconnected { color: #dc3545; }
+        .status-connecting { color: #ffc107; }
+        .status-error { color: #6c757d; }
+        .action-buttons .btn { margin-right: 5px; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="/">SNP Exporter</a>
+            <span class="navbar-text">
+                WebSocket Connection Manager
+            </span>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h2>SNP Connections</h2>
+            <div>
+                <button class="btn btn-success me-2" onclick="exportConfig()" title="Export all connections to JSON file">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-download" viewBox="0 0 16 16">
+                        <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
+                        <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/>
+                    </svg>
+                    Export
+                </button>
+                <button class="btn btn-info me-2" onclick="document.getElementById('importFile').click()" title="Import connections from JSON file">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-upload" viewBox="0 0 16 16">
+                        <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
+                        <path d="M7.646 4.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 5.707V14.5a.5.5 0 0 1-1 0V5.707L5.354 7.854a.5.5 0 1 1-.708-.708l3-3z"/>
+                    </svg>
+                    Import
+                </button>
+                <input type="file" id="importFile" accept=".json" style="display: none;" onchange="importConfig(event)">
+                <button class="btn btn-secondary me-2" onclick="reloadConfig()" title="Reload configuration and restart workers">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-arrow-clockwise" viewBox="0 0 16 16">
+                        <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
+                        <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
+                    </svg>
+                    Reload Config
+                </button>
+                <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#connectionModal" onclick="resetForm()">
+                    Add Connection
+                </button>
+            </div>
+        </div>
+        <div id="reloadAlert" class="alert alert-success alert-dismissible fade" role="alert">
+            <strong>Config Reloaded!</strong> Workers are restarting with new configuration.
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        <div id="importAlert" class="alert alert-info alert-dismissible fade" role="alert">
+            <strong>Import Complete!</strong> <span id="importMessage"></span>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead class="table-dark">
+                    <tr>
+                        <th>ID</th>
+                        <th>Name</th>
+                        <th>WebSocket URL</th>
+                        <th>Status</th>
+                        <th>Last Update</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="connectionsTable">
+                    <tr>
+                        <td colspan="6" class="text-center">Loading...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="modal fade" id="connectionModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="connectionModalLabel">Add Connection</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="connectionForm">
+                        <input type="hidden" id="connectionId">
+                        <div class="mb-3">
+                            <label for="name" class="form-label">Name *</label>
+                            <input type="text" class="form-control" id="name" required>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="restapi" class="form-label">REST API URL *</label>
+                                <input type="url" class="form-control" id="restapi" placeholder="https://192.168.1.1:9089/api/auth" required>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="websocket" class="form-label">WebSocket URL *</label>
+                                <input type="url" class="form-control" id="websocket" placeholder="wss://192.168.1.1/smm" required>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="username" class="form-label">Username *</label>
+                                <input type="text" class="form-control" id="username" required>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="password" class="form-label">Password *</label>
+                                <input type="text" class="form-control" id="password" required>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="enabled" checked>
+                                <label class="form-check-label" for="enabled">Enabled</label>
+                            </div>
+                        </div>
+                        
+                        <hr>
+                        <h6>Object IDs Subscription</h6>
+                        <div class="row mb-3">
+                            <div class="col-md-4">
+                                <label for="objectType" class="form-label">Object Type</label>
+                                <select class="form-select" id="objectType">
+                                    <option value="ptp">ptp</option>
+                                    <option value="system">system</option>
+                                    <option value="ipVidRx">ipVidRx</option>
+                                    <option value="procChannelHD">procChannelHD</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label for="elementIP" class="form-label">Element IP</label>
+                                <input type="text" class="form-control" id="elementIP" placeholder="127.0.0.1">
+                            </div>
+                            <div class="col-md-4" id="objectIdContainer" style="display: none;">
+                                <label for="objectId" class="form-label">Object ID</label>
+                                <input type="text" class="form-control" id="objectId" placeholder="A-HD-1">
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-success" onclick="addObjectId()">Add Object ID</button>
+                        
+                        <div class="mt-3">
+                            <table class="table table-sm" id="objectsTable">
+                                <thead>
+                                    <tr>
+                                        <th>Object Type</th>
+                                        <th>Element IP</th>
+                                        <th>Object ID</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="objectsTableBody"></tbody>
+                            </table>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="objectsPreview" class="form-label">JSON Preview</label>
+                            <textarea class="form-control" id="objectsPreview" rows="3" readonly></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="saveConnection()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="deleteModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Confirm Delete</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to delete this connection?</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-danger" id="confirmDeleteBtn">Delete</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let currentObjects = [];
+        let deleteId = null;
+        const deleteModal = new bootstrap.Modal(document.getElementById('deleteModal'));
+
+        document.getElementById('objectType').addEventListener('change', function() {
+            const objectIdContainer = document.getElementById('objectIdContainer');
+            if (this.value === 'procChannelHD') {
+                objectIdContainer.style.display = 'block';
+            } else {
+                objectIdContainer.style.display = 'none';
+            }
+        });
+
+        function resetForm() {
+            document.getElementById('connectionForm').reset();
+            document.getElementById('connectionId').value = '';
+            document.getElementById('enabled').checked = true;
+            document.getElementById('connectionModalLabel').textContent = 'Add Connection';
+            currentObjects = [];
+            renderObjectsTable();
+        }
+
+        function addObjectId() {
+            const objectType = document.getElementById('objectType').value;
+            const elementIP = document.getElementById('elementIP').value || '127.0.0.1';
+            let objectId = null;
+
+            if (objectType === 'procChannelHD') {
+                objectId = document.getElementById('objectId').value;
+                if (!objectId) {
+                    alert('Object ID is required for procChannelHD');
+                    return;
+                }
+            }
+
+            currentObjects.push({ objectType, elementIP, objectId });
+            renderObjectsTable();
+
+            document.getElementById('elementIP').value = '';
+            document.getElementById('objectId').value = '';
+        }
+
+        function removeObject(index) {
+            currentObjects.splice(index, 1);
+            renderObjectsTable();
+        }
+
+        function renderObjectsTable() {
+            const tbody = document.getElementById('objectsTableBody');
+            tbody.innerHTML = '';
+
+            currentObjects.forEach((obj, index) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${obj.objectType}</td>
+                    <td>${obj.elementIP}</td>
+                    <td>${obj.objectId || '-'}</td>
+                    <td><button type="button" class="btn btn-sm btn-danger" onclick="removeObject(${index})">Remove</button></td>
+                `;
+                tbody.appendChild(row);
+            });
+
+            updatePreview();
+        }
+
+        function updatePreview() {
+            const objects = currentObjects.map(obj => {
+                const entry = { elementIP: obj.elementIP, objectType: obj.objectType };
+                if (obj.objectId) {
+                    entry.objectId = obj.objectId;
+                }
+                return entry;
+            });
+            document.getElementById('objectsPreview').value = JSON.stringify(objects, null, 2);
+        }
+
+        async function loadConnections() {
+            try {
+                const response = await fetch('/api/connections');
+                const connections = await response.json();
+                renderConnections(connections);
+            } catch (error) {
+                console.error('Failed to load connections:', error);
+                document.getElementById('connectionsTable').innerHTML = `
+                    <tr><td colspan="6" class="text-center text-danger">Failed to load connections</td></tr>
+                `;
+            }
+        }
+
+        function renderConnections(connections) {
+            const tbody = document.getElementById('connectionsTable');
+            
+            if (connections.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" class="text-center">No connections found. Click "Add Connection" to get started.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = connections.map(conn => {
+                let statusIcon = '';
+                let statusClass = '';
+                switch(conn.status) {
+                    case 'connected':
+                        statusIcon = '🟢';
+                        statusClass = 'status-connected';
+                        break;
+                    case 'connecting':
+                        statusIcon = '🟡';
+                        statusClass = 'status-connecting';
+                        break;
+                    case 'error':
+                        statusIcon = '⚫';
+                        statusClass = 'status-error';
+                        break;
+                    default:
+                        statusIcon = '🔴';
+                        statusClass = 'status-disconnected';
+                }
+
+                const lastUpdate = conn.last_update ? new Date(conn.last_update).toLocaleString() : 'Never';
+                const metricsUrl = window.location.origin.replace(':8080', ':8000') + '/metrics';
+                const enabledBadge = conn.enabled ? 
+                    '<span class="badge bg-success">Enabled</span>' : 
+                    '<span class="badge bg-secondary">Disabled</span>';
+
+                return `
+                    <tr>
+                        <td>${conn.id}</td>
+                        <td>
+                            <strong>${conn.name}</strong><br>
+                            ${enabledBadge}
+                        </td>
+                        <td><code class="text-break">${conn.websocket}</code></td>
+                        <td class="${statusClass}">${statusIcon} ${conn.status}</td>
+                        <td><small>${lastUpdate}</small></td>
+                        <td class="action-buttons">
+                            <a href="${metricsUrl}" target="_blank" class="btn btn-sm btn-info" title="View Metrics">Metrics</a>
+                            <button class="btn btn-sm btn-warning" onclick="editConnection(${conn.id})" title="Edit">Edit</button>
+                            <button class="btn btn-sm btn-danger" onclick="confirmDelete(${conn.id})" title="Delete">Delete</button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        async function saveConnection() {
+            const id = document.getElementById('connectionId').value;
+            const name = document.getElementById('name').value;
+            const restapi = document.getElementById('restapi').value;
+            const websocket = document.getElementById('websocket').value;
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const enabled = document.getElementById('enabled').checked;
+
+            if (!name || !restapi || !websocket || !username || !password) {
+                alert('Please fill in all required fields');
+                return;
+            }
+
+            if (currentObjects.length === 0) {
+                alert('Please add at least one object ID subscription');
+                return;
+            }
+
+            const objects = currentObjects.map(obj => {
+                const entry = { elementIP: obj.elementIP, objectType: obj.objectType };
+                if (obj.objectId) {
+                    entry.objectId = obj.objectId;
+                }
+                return entry;
+            });
+
+            const data = {
+                name, restapi, websocket, username, password,
+                objects_ids: objects, enabled
+            };
+
+            try {
+                const url = id ? `/api/connections/${id}` : '/api/connections';
+                const method = id ? 'PUT' : 'POST';
+                const response = await fetch(url, {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                if (response.ok) {
+                    bootstrap.Modal.getInstance(document.getElementById('connectionModal')).hide();
+                    showReloadAlert();
+                    loadConnections();
+                } else {
+                    alert('Failed to save connection');
+                }
+            } catch (error) {
+                console.error('Failed to save connection:', error);
+                alert('Failed to save connection');
+            }
+        }
+
+        async function editConnection(id) {
+            try {
+                const response = await fetch(`/api/connections/${id}`);
+                const conn = await response.json();
+
+                document.getElementById('connectionId').value = conn.id;
+                document.getElementById('name').value = conn.name;
+                document.getElementById('restapi').value = conn.restapi;
+                document.getElementById('websocket').value = conn.websocket;
+                document.getElementById('username').value = conn.username;
+                document.getElementById('password').value = conn.password;
+                document.getElementById('enabled').checked = conn.enabled;
+
+                currentObjects = conn.objects_ids.map(obj => ({
+                    objectType: obj.objectType,
+                    elementIP: obj.elementIP,
+                    objectId: obj.objectId || null
+                }));
+                renderObjectsTable();
+
+                document.getElementById('connectionModalLabel').textContent = 'Edit Connection';
+                new bootstrap.Modal(document.getElementById('connectionModal')).show();
+            } catch (error) {
+                console.error('Failed to load connection:', error);
+                alert('Failed to load connection details');
+            }
+        }
+
+        function confirmDelete(id) {
+            deleteId = id;
+            deleteModal.show();
+        }
+
+        document.getElementById('confirmDeleteBtn').addEventListener('click', async function() {
+            if (deleteId) {
+                try {
+                    const response = await fetch(`/api/connections/${deleteId}`, { method: 'DELETE' });
+                    if (response.ok) {
+                        deleteModal.hide();
+                        showReloadAlert();
+                        loadConnections();
+                    } else {
+                        alert('Failed to delete connection');
+                    }
+                } catch (error) {
+                    console.error('Failed to delete connection:', error);
+                    alert('Failed to delete connection');
+                }
+                deleteId = null;
+            }
+        });
+
+        async function reloadConfig() {
+            try {
+                const metricsUrl = window.location.origin.replace(':8080', ':8000');
+                const response = await fetch(`${metricsUrl}/-/reload`);
+                if (response.ok) {
+                    showReloadAlert();
+                    setTimeout(loadConnections, 2000);
+                } else {
+                    alert('Failed to reload configuration');
+                }
+            } catch (error) {
+                console.error('Failed to reload config:', error);
+                alert('Failed to reload configuration');
+            }
+        }
+
+        function showReloadAlert() {
+            const alert = document.getElementById('reloadAlert');
+            alert.classList.add('show');
+            setTimeout(() => {
+                alert.classList.remove('show');
+            }, 3000);
+        }
+
+        function showImportAlert(message) {
+            const alert = document.getElementById('importAlert');
+            document.getElementById('importMessage').textContent = message;
+            alert.classList.add('show');
+            setTimeout(() => {
+                alert.classList.remove('show');
+            }, 5000);
+        }
+
+        async function exportConfig() {
+            try {
+                const response = await fetch('/api/export');
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    // Create download
+                    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `snp-connections-${new Date().toISOString().split('T')[0]}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    window.URL.revokeObjectURL(url);
+                    
+                    showImportAlert(`Exported ${data.connections.length} connection(s) successfully.`);
+                } else {
+                    alert('Failed to export configuration');
+                }
+            } catch (error) {
+                console.error('Failed to export config:', error);
+                alert('Failed to export configuration');
+            }
+        }
+
+        async function importConfig(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            try {
+                const text = await file.text();
+                const data = JSON.parse(text);
+                
+                // Validate format
+                if (!data.connections || !Array.isArray(data.connections)) {
+                    alert('Invalid import file format. Expected JSON with "connections" array.');
+                    event.target.value = '';
+                    return;
+                }
+                
+                // Confirm import
+                if (!confirm(`Import ${data.connections.length} connection(s)?\n\nExisting connections with the same name will be skipped.`)) {
+                    event.target.value = '';
+                    return;
+                }
+                
+                const response = await fetch('/api/import', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: text
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    let message = `Imported: ${result.imported}, Skipped: ${result.skipped}`;
+                    
+                    if (result.errors && result.errors.length > 0) {
+                        console.warn('Import errors:', result.errors);
+                        message += `. ${result.errors.length} error(s) - check console.`;
+                    }
+                    
+                    showImportAlert(message);
+                    loadConnections();
+                } else {
+                    const error = await response.json();
+                    alert(`Failed to import: ${error.error || 'Unknown error'}`);
+                }
+                
+            } catch (error) {
+                console.error('Failed to import config:', error);
+                alert('Failed to import configuration. Check file format.');
+            }
+            
+            // Reset file input
+            event.target.value = '';
+        }
+
+        setInterval(loadConnections, 5000);
+        loadConnections();
+    </script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+pyyaml
+asyncio
+fastapi
+aiohttp
+prometheus_client
+uvicorn
+websockets
+aiosqlite
+jinja2

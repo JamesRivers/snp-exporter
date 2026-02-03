@@ -1,0 +1,18 @@
+services:
+  snp_exporter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: snp_exporter:latest
+    container_name: observe-snpexporter
+    hostname: observe-snpexporter
+    ports:
+      - "8000:8000"
+      - "8080:8080"
+    environment:
+      - LOGGING=INFO
+      - INTERVAL=5
+      - POLL_INTERVAL=10
+      - DB_PATH=/etc/snp_exporter/connections.db
+    volumes:
+      - ./:/etc/snp_exporter/
