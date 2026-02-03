@@ -75,20 +75,10 @@ docker compose up -d
 
 ### Option 2: Building from Source
 
-If you have the source code, you can build the image yourself:
+If you have the source code, via a git clone of thi repo,  you can build the image yourself:
 
-1. **Unzip the files**:
-
-```bash
-unzip exporter_snp.zip -d /opt/snp_exporter
-cd /opt/snp_exporter
-```
-
-2. **Build and start the container**:
-
-```bash
-docker compose up -d
-```
+- clone the repo
+- run compose 'docker compose up -d'
 
 3. **Access the services**:
 
