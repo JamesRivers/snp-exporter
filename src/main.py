@@ -64,6 +64,31 @@ aco_abstatus = Gauge('ic_snp_aco_abstatus', 'ACO A/B Status', ['target', 'index'
 # Processor personality
 processor_personality = Info('ic_snp_processor_personality', 'Processor personality', ['target', 'processor'])
 
+# QSFP status metrics
+qsfp_present = Gauge('ic_snp_qsfp_present', 'QSFP module present (1=Present, 0=Not Present)', ['target', 'index'])
+qsfp_data_valid = Gauge('ic_snp_qsfp_data_valid', 'QSFP data valid (1=Valid, 0=Invalid)', ['target', 'index'])
+qsfp_temp_alarm = Gauge('ic_snp_qsfp_temp_alarm', 'QSFP temperature alarm (1=Alarm, 0=OK)', ['target', 'index'])
+
+# SFP status metrics
+sfp_present = Gauge('ic_snp_sfp_present', 'SFP module present (1=Present, 0=Not Present)', ['target', 'index'])
+sfp_mismatch = Gauge('ic_snp_sfp_mismatch', 'SFP module mismatch (1=Mismatch, 0=OK)', ['target', 'index'])
+
+# FPGA alarm metrics
+fpga_temp_alarm = Gauge('ic_snp_fpga_temp_alarm', 'FPGA temperature alarm (1=Alarm, 0=OK)', ['target', 'index'])
+fpga_config_alarm = Gauge('ic_snp_fpga_config_alarm', 'FPGA configuration alarm (1=Alarm, 0=OK)', ['target', 'index'])
+fpga_fan_alarm = Gauge('ic_snp_fpga_fan_alarm', 'FPGA fan alarm (1=Alarm, 0=OK)', ['target', 'index'])
+
+# Fan RPM metrics
+front_fan_rpm = Gauge('ic_snp_front_fan_rpm', 'Front fan rotational speed (RPM)', ['target', 'index'])
+
+# FCS error metrics
+fcs_primary_errors_exceeded = Gauge('ic_snp_fcs_primary_errors_exceeded', 'Primary FCS errors exceeded threshold (1=Yes, 0=No)', ['target'])
+fcs_secondary_errors_exceeded = Gauge('ic_snp_fcs_secondary_errors_exceeded', 'Secondary FCS errors exceeded threshold (1=Yes, 0=No)', ['target'])
+
+# Processor configuration metrics
+processor_force_mab = Gauge('ic_snp_processor_force_mab', 'Force MAB mode enabled (1=Enabled, 0=Disabled)', ['target', 'processor'])
+processor_audio_packet_time = Gauge('ic_snp_processor_audio_packet_time_ms', 'Audio IP TX packet time (milliseconds)', ['target', 'processor'])
+
 metrics_app = make_asgi_app()
 app.mount("/metrics", metrics_app)
 
@@ -385,13 +410,41 @@ async def parse_statuses(statuses, name):
             temperature_mainboard.labels(target=name).set(safe_float(status["Board_Temperatures"]["Main_Board"].split(" ")[0]))
             temperature_ioboard.labels(target=name).set(safe_float(status["Board_Temperatures"]["IO_Board"].split(" ")[0]))
             powersupply_status.labels(target=name).set(1 if status["Power_Supply_Stats"]["PS_Status"] == "OK" else 0)
+            # FPGA stats with alarms
             for stat in status["FPGA_HW_Stats"]:
-                fpga_temperature.labels(target=name, index=stat["idx"]).set(safe_float(stat["Temp"].split(" ")[0]))
-                fpga_fan_status.labels(target=name, index=stat["idx"]).set(1 if stat["Fan_Status"] == "OK" else 0)
+                idx = stat["idx"]
+                fpga_temperature.labels(target=name, index=idx).set(safe_float(stat["Temp"].split(" ")[0]))
+                fpga_fan_status.labels(target=name, index=idx).set(1 if stat["Fan_Status"] == "OK" else 0)
+                fpga_temp_alarm.labels(target=name, index=idx).set(1 if stat.get("Temp_Alarm", False) else 0)
+                fpga_config_alarm.labels(target=name, index=idx).set(1 if stat.get("Configuration_Alarm", False) else 0)
+                fpga_fan_alarm.labels(target=name, index=idx).set(1 if stat.get("Fan_Alarm", False) else 0)
+            
+            # Front fan stats with RPM
             for stat in status["Front_Fan_Stats"]:
-                front_fan_status.labels(target=name, index=stat["idx"]).set(1 if stat["Status"] == "OK" else 0)
+                idx = stat["idx"]
+                front_fan_status.labels(target=name, index=idx).set(1 if stat["Status"] == "OK" else 0)
+                # Extract RPM from "11843 RPM" format
+                rpm_str = stat.get("RotationalSpeed", "0 RPM").split(" ")[0]
+                front_fan_rpm.labels(target=name, index=idx).set(safe_float(rpm_str))
+            
+            # QSFP stats with status
             for stat in status["QSFP_Stats"]:
-                qsfp_temperature.labels(target=name, index=stat["idx"]).set(safe_float(stat["Temperature"].split(" ")[0]))
+                idx = stat["idx"]
+                qsfp_temperature.labels(target=name, index=idx).set(safe_float(stat["Temperature"].split(" ")[0]))
+                qsfp_present.labels(target=name, index=idx).set(1 if stat.get("present", False) else 0)
+                qsfp_data_valid.labels(target=name, index=idx).set(1 if stat.get("dataValid", False) else 0)
+                qsfp_temp_alarm.labels(target=name, index=idx).set(1 if stat.get("Temp_Alarm", False) else 0)
+            
+            # SFP stats
+            for stat in status.get("SFP_Stats", []):
+                idx = stat["idx"]
+                sfp_present.labels(target=name, index=idx).set(1 if stat.get("SFP_Present", False) else 0)
+                sfp_mismatch.labels(target=name, index=idx).set(1 if stat.get("SFP_Mismatch", False) else 0)
+            
+            # FCS error stats
+            fcs_stats = status.get("FCS_Stats", {})
+            fcs_primary_errors_exceeded.labels(target=name).set(1 if fcs_stats.get("priFCSerrorsExceeded", False) else 0)
+            fcs_secondary_errors_exceeded.labels(target=name).set(1 if fcs_stats.get("secFCSerrorsExceeded", False) else 0)
         
         elif status_type == "ptp":
             ptp_data = status["ptpStatus"]
@@ -458,7 +511,7 @@ async def get_token(name, url, username, password):
         return None
 
 async def get_processor_personality(name, base_url, token, element_ip, processor):
-    """Fetch processor personality from REST API"""
+    """Fetch processor personality and configuration from REST API"""
     async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
         headers = {"Content-type": "application/json", "Authorization": token}
         
@@ -473,12 +526,27 @@ async def get_processor_personality(name, base_url, token, element_ip, processor
                 
                 if 'config' in response_data:
                     config = json.loads(response_data['config'])
-                    if 'general' in config and 'personality' in config['general']:
-                        personality = config['general']['personality']
+                    general = config.get('general', {})
+                    
+                    # Extract personality
+                    personality = None
+                    if 'personality' in general:
+                        personality = general['personality']
                         logger.debug(f"Worker {name} {processor} personality: {personality}")
-                        return personality
+                    
+                    # Extract additional config metrics
+                    force_mab = 1 if general.get('forceMAB', False) else 0
+                    audio_packet_time = safe_float(general.get('audioPacketTime', 0))
+                    
+                    # Update processor metrics
+                    processor_force_mab.labels(target=name, processor=processor).set(force_mab)
+                    processor_audio_packet_time.labels(target=name, processor=processor).set(audio_packet_time)
+                    
+                    logger.debug(f"Worker {name} {processor} forceMAB={force_mab}, audioPacketTime={audio_packet_time}ms")
+                    
+                    return personality
                 
-                logger.debug(f"Worker {name} {processor} no personality found in response")
+                logger.debug(f"Worker {name} {processor} no config found in response")
                 return None
             else:
                 error_text = await resp.text()
@@ -486,7 +554,7 @@ async def get_processor_personality(name, base_url, token, element_ip, processor
                 return None
 
         except Exception as err:
-            logger.error(f"Worker {name} unable to get {processor} personality: {err}")
+            logger.error(f"Worker {name} unable to get {processor} config: {err}")
             return None
 
 def remove_metrics(target):
