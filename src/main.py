@@ -49,9 +49,13 @@ fpga_fan_status  = Gauge('ic_snp_fpga_fan_status', 'FPGA fan status (OK == 1)', 
 front_fan_status  = Gauge('ic_snp_front_fan_status', 'Front fan status (OK == 1)', ['target', 'index'])
 qsfp_temperature  = Gauge('ic_snp_qsfp_temperature', 'QSFP temperature', ['target', 'index'])
 
-ptp_status = Gauge('ic_snp_ptp_status', 'PTP status)', ['target'])
+ptp_status = Gauge('ic_snp_ptp_status', 'PTP status (1=Locked, 0=Not Locked)', ['target'])
 ptp_master_offset = Gauge('ic_snp_ptp_master_offset', 'PTP master offset', ['target'])
 ptp_master_delay = Gauge('ic_snp_ptp_master_delay', 'PTP master delay', ['target'])
+ptp_info = Info('ic_snp_ptp_info', 'PTP information', ['target'])
+ptp_biggest_sys_time_update = Gauge('ic_snp_ptp_biggest_sys_time_update_ms', 'Biggest system time update (milliseconds)', ['target'])
+ptp_num_sys_time_updates = Gauge('ic_snp_ptp_num_sys_time_updates', 'Number of system time updates', ['target'])
+ptp_is_master = Gauge('ic_snp_ptp_is_master', 'PTP is master (1=Master, 0=Slave)', ['target'])
 
 video_rx = Info('ic_snp_video_rx', 'Video RX information', ['target', 'index'])
 
@@ -390,9 +394,35 @@ async def parse_statuses(statuses, name):
                 qsfp_temperature.labels(target=name, index=stat["idx"]).set(safe_float(stat["Temperature"].split(" ")[0]))
         
         elif status_type == "ptp":
-            ptp_status.labels(target=name).set(1 if status["ptpStatus"]["ptpCtlrState"] == "Locked" else 0)
-            ptp_master_offset.labels(target=name).set(status["ptpStatus"]["ptpMasterOffset"].split(" ")[0])
-            ptp_master_delay.labels(target=name).set(status["ptpStatus"]["ptpMasterDelay"].split(" ")[0])
+            ptp_data = status["ptpStatus"]
+            
+            # Existing metrics (backwards compatible)
+            ptp_status.labels(target=name).set(1 if ptp_data["ptpCtlrState"] == "Locked" else 0)
+            ptp_master_offset.labels(target=name).set(safe_float(ptp_data["ptpMasterOffset"].split(" ")[0]))
+            ptp_master_delay.labels(target=name).set(safe_float(ptp_data["ptpMasterDelay"].split(" ")[0]))
+            
+            # New comprehensive PTP info
+            ptp_info.labels(target=name).info({
+                "clock_identity": ptp_data.get("clockIdentity", "N/A"),
+                "controller_state": ptp_data.get("ptpCtlrState", "N/A"),
+                "master_ip": ptp_data.get("ptpMasterIP", "N/A"),
+                "master_interface_ip": ptp_data.get("ptpMasterInterfaceIP", "N/A"),
+                "master_uuid": ptp_data.get("ptpMasterUUID", "N/A"),
+                "master_present": ptp_data.get("ptpMasterPresent", "N/A"),
+                "utc_time": ptp_data.get("ptpUTC", "N/A"),
+                "rtc_time": ptp_data.get("rtcTime", "N/A")
+            })
+            
+            # Numeric metrics
+            biggest_update = ptp_data.get("biggestSysTimeUpdate", "0 ms").split(" ")[0]
+            ptp_biggest_sys_time_update.labels(target=name).set(safe_float(biggest_update))
+            
+            num_updates = ptp_data.get("numSysTimeUpdates", "0")
+            ptp_num_sys_time_updates.labels(target=name).set(safe_float(num_updates))
+            
+            # Is master or slave
+            is_master_str = ptp_data.get("ptpUcipIsMaster", "Slave")
+            ptp_is_master.labels(target=name).set(1 if is_master_str == "Master" else 0)
 
         elif status_type == "ipVidRx":
             for stat in status["ipVidRxStatus"]:

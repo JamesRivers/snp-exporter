@@ -238,9 +238,13 @@ The application uses a SQLite database (`connections.db`) for persistent configu
 - `ic_snp_minor_alarms{target}` - Number of minor alarms
 
 ### PTP Metrics
-- `ic_snp_ptp_status{target}` - PTP status (1=Locked, 0=Not Locked)
-- `ic_snp_ptp_master_offset{target}` - PTP master offset
-- `ic_snp_ptp_master_delay{target}` - PTP master delay
+- `ic_snp_ptp_status{target}` - PTP controller status (1=Locked, 0=Not Locked)
+- `ic_snp_ptp_master_offset{target}` - PTP master offset (microseconds)
+- `ic_snp_ptp_master_delay{target}` - PTP master delay (microseconds)
+- `ic_snp_ptp_info{target}` - PTP information (info metric with labels: clock_identity, controller_state, master_ip, master_interface_ip, master_uuid, master_present, utc_time, rtc_time)
+- `ic_snp_ptp_biggest_sys_time_update_ms{target}` - Biggest system time update (milliseconds)
+- `ic_snp_ptp_num_sys_time_updates{target}` - Number of system time updates
+- `ic_snp_ptp_is_master{target}` - PTP role (1=Master, 0=Slave)
 
 ### Video Metrics
 - `ic_snp_video_rx{target,index}` - Video receiver information (info metric)

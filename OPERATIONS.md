@@ -1057,24 +1057,61 @@ ic_snp_minor_alarms{target="Studio-A-SNP"} 2.0
 ```
 
 #### PTP Metrics
+
+**Status Metrics:**
 ```prometheus
 ic_snp_ptp_status{target="Studio-A-SNP"} 1.0
-ic_snp_ptp_master_offset{target="Studio-A-SNP"} 45.0
-ic_snp_ptp_master_delay{target="Studio-A-SNP"} 120.0
+ic_snp_ptp_master_offset{target="Studio-A-SNP"} 0.642
+ic_snp_ptp_master_delay{target="Studio-A-SNP"} 0.169
+ic_snp_ptp_is_master{target="Studio-A-SNP"} 0.0
+ic_snp_ptp_biggest_sys_time_update_ms{target="Studio-A-SNP"} 1004.0
+ic_snp_ptp_num_sys_time_updates{target="Studio-A-SNP"} 23.0
 ```
 
-**Values:**
-- `ptp_status`: 1 = Locked, 0 = Not Locked
-- `ptp_master_offset`: Nanoseconds
-- `ptp_master_delay`: Nanoseconds
+**Information Metric:**
+```prometheus
+ic_snp_ptp_info{
+  target="Studio-A-SNP",
+  clock_identity="00 90 F9 FF FE 34 6C AF",
+  controller_state="Locked",
+  master_ip="2.2.2.2",
+  master_interface_ip="192.168.61.33",
+  master_uuid="00-04-B3-FF-FE-F0-14-7D",
+  master_present="Primary/Secondary",
+  utc_time="Tue Feb 3 22:04:15 2026",
+  rtc_time="N/A"
+} 1.0
+```
 
-**Alert Example:**
+**Metric Descriptions:**
+- `ptp_status`: 1 = Locked, 0 = Not Locked
+- `ptp_master_offset`: Offset from master (microseconds)
+- `ptp_master_delay`: Delay to master (microseconds)
+- `ptp_is_master`: 1 = Master, 0 = Slave
+- `ptp_biggest_sys_time_update_ms`: Largest time correction (milliseconds)
+- `ptp_num_sys_time_updates`: Count of time corrections
+- `ptp_info`: Detailed PTP information including master IP, clock ID, UTC time
+
+**Alert Examples:**
 ```yaml
+# PTP Not Locked
 - alert: SNPPTPUnlocked
   expr: ic_snp_ptp_status == 0
   for: 2m
   annotations:
     summary: "SNP {{ $labels.target }} PTP not locked"
+
+# Large Time Adjustment
+- alert: SNPPTPLargeTimeUpdate
+  expr: ic_snp_ptp_biggest_sys_time_update_ms > 500
+  annotations:
+    summary: "SNP {{ $labels.target }} had large time update: {{ $value }}ms"
+
+# PTP Master Changed
+- alert: SNPPTPMasterChanged
+  expr: changes(ic_snp_ptp_info[5m]) > 0
+  annotations:
+    summary: "SNP {{ $labels.target }} PTP master changed"
 ```
 
 #### Video Receiver Metrics
