@@ -1,0 +1,26 @@
+prometheus.scrape "snp_exporter_metrics" {
+  targets = [
+    { __address__ = "10.10.253.19:8000" },
+  ]
+
+  scrape_interval = "15s"
+  metrics_path    = "/metrics/"
+
+  forward_to = [prometheus.relabel.snoop.receiver]
+}
+
+prometheus.relabel "snoop" {
+  rule {
+    target_label = "job"
+    replacement  = "alloy_snp_exporter"
+  }
+
+  forward_to = [prometheus.remote_write.local.receiver]
+}
+
+prometheus.remote_write "local" {
+  endpoint {
+    url = "http://prometheus:9090/api/v1/write"
+  }
+}
+

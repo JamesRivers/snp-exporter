@@ -89,6 +89,13 @@ fcs_secondary_errors_exceeded = Gauge('ic_snp_fcs_secondary_errors_exceeded', 'S
 processor_force_mab = Gauge('ic_snp_processor_force_mab', 'Force MAB mode enabled (1=Enabled, 0=Disabled)', ['target', 'processor'])
 processor_audio_packet_time = Gauge('ic_snp_processor_audio_packet_time_ms', 'Audio IP TX packet time (milliseconds)', ['target', 'processor'])
 
+# Console metrics
+console_uptime_seconds = Gauge('ic_snp_console_uptime_seconds', 'System uptime since last boot (seconds)', ['target'])
+console_power_on_time_seconds = Gauge('ic_snp_console_power_on_time_seconds', 'Cumulative power-on time (seconds)', ['target'])
+console_info = Info('ic_snp_console_info', 'Console information', ['target'])
+control_link_bonding_status = Gauge('ic_snp_control_link_bonding_status', 'Control link bonding status (0=dual, 1=bonded_active_backup, 2=bonded_lacp)', ['target'])
+control_link_bonding_info = Info('ic_snp_control_link_bonding_info', 'Control link bonding mode', ['target'])
+
 metrics_app = make_asgi_app()
 app.mount("/metrics", metrics_app)
 
@@ -260,6 +267,58 @@ async def processor_personality_poller(name, url, username, password, element_ip
             logger.error(f"Processor personality poller error for {name}: {err}")
             await asyncio.sleep(60)
 
+async def console_metrics_poller(name, url, username, password, element_ip):
+    """Background task to poll console metrics every 60 seconds"""
+    logger.info(f"Console metrics poller started for {name}")
+    while True:
+        try:
+            await asyncio.sleep(60)  # Poll every 60 seconds
+            logger.info(f"Console metrics poller for {name} - starting poll cycle")
+            
+            token = await get_token(name, url, username, password)
+            if not token:
+                continue
+            
+            # Fetch console status
+            console_data = await get_console_status(name, url, token)
+            if console_data:
+                # Parse uptime and power on time
+                uptime_str = console_data.get('upTime', '')
+                power_on_str = console_data.get('pwrOnTime', '')
+                
+                if uptime_str:
+                    uptime_seconds = parse_uptime(uptime_str)
+                    console_uptime_seconds.labels(target=name).set(uptime_seconds)
+                    logger.debug(f"Worker {name} uptime: {uptime_seconds}s ({uptime_str})")
+                
+                if power_on_str:
+                    power_on_seconds = parse_power_on_time(power_on_str)
+                    console_power_on_time_seconds.labels(target=name).set(power_on_seconds)
+                    logger.debug(f"Worker {name} power on time: {power_on_seconds}s ({power_on_str})")
+                
+                # Update info metric with original formatted strings
+                console_info.labels(target=name).info({
+                    'uptime': uptime_str,
+                    'power_on_time': power_on_str,
+                    'firmware': console_data.get('firmwareVer', ''),
+                    'serial': console_data.get('serialNum', '')
+                })
+            
+            # Fetch system config for Net_Mode
+            net_mode = await get_system_config(name, url, token, element_ip)
+            if net_mode:
+                normalized_mode, mode_value = normalize_net_mode(net_mode)
+                control_link_bonding_status.labels(target=name).set(mode_value)
+                control_link_bonding_info.labels(target=name).info({'mode': normalized_mode})
+                logger.debug(f"Worker {name} control link bonding: {net_mode} -> {normalized_mode} ({mode_value})")
+                
+        except asyncio.CancelledError:
+            logger.info(f"Console metrics poller for {name} cancelled")
+            raise
+        except Exception as err:
+            logger.error(f"Console metrics poller error for {name}: {err}")
+            await asyncio.sleep(60)
+
 async def worker(conn_id: int, interval: int):
     while True:
         conn = await db.get_connection_by_id(conn_id)
@@ -307,11 +366,18 @@ async def worker(conn_id: int, interval: int):
 
                 await db.update_connection_status(conn_id, "connected")
                 
-                # Start processor personality poller task
+                # Start background poller tasks
+                logger.info(f"Worker {name} spawning background tasks...")
                 personality_task = asyncio.create_task(
                     processor_personality_poller(name, url, username, password, element_ip),
                     name=f"personality_{conn_id}"
                 )
+                logger.info(f"Worker {name} personality task created")
+                console_task = asyncio.create_task(
+                    console_metrics_poller(name, url, username, password, element_ip),
+                    name=f"console_{conn_id}"
+                )
+                logger.info(f"Worker {name} console task created")
 
                 try:
                     while True:
@@ -365,10 +431,11 @@ async def worker(conn_id: int, interval: int):
                             logger.error(f"Worker {name} unexpected error: {err}")
                 
                 finally:
-                    # Cancel personality task when exiting websocket
+                    # Cancel background tasks when exiting websocket
                     personality_task.cancel()
+                    console_task.cancel()
                     try:
-                        await personality_task
+                        await asyncio.gather(personality_task, console_task, return_exceptions=True)
                     except asyncio.CancelledError:
                         pass
 
@@ -395,6 +462,58 @@ def safe_float(value):
         return float(value)
     except (ValueError, TypeError):
         return float('nan')
+
+def parse_uptime(uptime_str):
+    """Parse uptime string like 'up 2 weeks, 1 hour, 25 minutes' to seconds"""
+    import re
+    seconds = 0
+    try:
+        weeks = re.search(r'(\d+)\s*week', uptime_str)
+        days = re.search(r'(\d+)\s*day', uptime_str)
+        hours = re.search(r'(\d+)\s*hour', uptime_str)
+        minutes = re.search(r'(\d+)\s*minute', uptime_str)
+        
+        if weeks: seconds += int(weeks.group(1)) * 604800
+        if days: seconds += int(days.group(1)) * 86400
+        if hours: seconds += int(hours.group(1)) * 3600
+        if minutes: seconds += int(minutes.group(1)) * 60
+    except Exception as err:
+        logger.error(f"Error parsing uptime '{uptime_str}': {err}")
+    return seconds
+
+def parse_power_on_time(time_str):
+    """Parse power on time string like '14 days 01 hours 26 minutes 09 sec' to seconds"""
+    import re
+    seconds = 0
+    try:
+        days = re.search(r'(\d+)\s*day', time_str)
+        hours = re.search(r'(\d+)\s*hour', time_str)
+        minutes = re.search(r'(\d+)\s*minute', time_str)
+        secs = re.search(r'(\d+)\s*sec', time_str)
+        
+        if days: seconds += int(days.group(1)) * 86400
+        if hours: seconds += int(hours.group(1)) * 3600
+        if minutes: seconds += int(minutes.group(1)) * 60
+        if secs: seconds += int(secs.group(1))
+    except Exception as err:
+        logger.error(f"Error parsing power on time '{time_str}': {err}")
+    return seconds
+
+def normalize_net_mode(net_mode_str):
+    """Normalize Net_Mode string to standard format"""
+    mode_map = {
+        "dual addresses": ("dual", 0),
+        "bonded active/backup": ("bonded_active_backup", 1),
+        "bonded lacp": ("bonded_lacp", 2)
+    }
+    normalized, value = mode_map.get(net_mode_str.lower(), ("unknown", 0))
+    return normalized, value
+
+def extract_element_ip(ws_url):
+    """Extract element IP from WebSocket URL or return default"""
+    # WebSocket URLs are typically wss://IP/smm
+    # For SNP devices, element_ip is usually 127.0.0.1
+    return "127.0.0.1"
 
 async def parse_statuses(statuses, name):
     for status in statuses:
@@ -557,6 +676,57 @@ async def get_processor_personality(name, base_url, token, element_ip, processor
             logger.error(f"Worker {name} unable to get {processor} config: {err}")
             return None
 
+async def get_console_status(name, base_url, token):
+    """Fetch console status including uptime and power on time"""
+    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
+        headers = {"Content-type": "application/json", "Authorization": token}
+        
+        # Extract base URL (remove /api/auth part)
+        api_base = base_url.rsplit('/api/', 1)[0]
+        url = f"{api_base}/api/console/status"
+        
+        try:
+            resp = await session.get(url, headers=headers)
+            if resp.status in [200, 201, 204]:
+                data = await resp.json()
+                # Console API returns data in nested "data" field
+                return data.get('data', {})
+            else:
+                error_text = await resp.text()
+                logger.debug(f"Worker {name} console status unavailable: HTTP {resp.status}")
+                return None
+        except Exception as err:
+            logger.debug(f"Worker {name} console status error: {err}")
+            return None
+
+async def get_system_config(name, base_url, token, element_ip):
+    """Fetch system configuration including Net_Mode"""
+    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
+        headers = {"Content-type": "application/json", "Authorization": token}
+        
+        api_base = base_url.rsplit('/api/', 1)[0]
+        url = f"{api_base}/api/elements/{element_ip}/config/system"
+        
+        try:
+            resp = await session.get(url, headers=headers)
+            if resp.status in [200, 201, 204]:
+                response_data = await resp.json()
+                
+                if 'config' in response_data:
+                    config = json.loads(response_data['config'])
+                    system_control = config.get('System_Control', {})
+                    net_mode = system_control.get('Net_Mode')
+                    return net_mode
+                    
+                return None
+            else:
+                error_text = await resp.text()
+                logger.debug(f"Worker {name} system config unavailable: HTTP {resp.status}")
+                return None
+        except Exception as err:
+            logger.debug(f"Worker {name} system config error: {err}")
+            return None
+
 def remove_metrics(target):
     try:
         api_status.remove(target)
@@ -571,6 +741,10 @@ def remove_metrics(target):
         hardware_stats.remove(target)
         major_alarms.remove(target)
         minor_alarms.remove(target)
+        # Console metrics
+        console_uptime_seconds.remove(target)
+        console_power_on_time_seconds.remove(target)
+        control_link_bonding_status.remove(target)
     except Exception as err:
         logger.error(f"Failed to remove metrics for target {target} because: {err}")
 
