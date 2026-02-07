@@ -4,6 +4,8 @@ fastapi
 aiohttp
 prometheus_client
 uvicorn
-websockets
+websockets>=12.0
 aiosqlite
 jinja2
+requests>=2.31.0
+urllib3>=2.0.0
